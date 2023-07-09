@@ -79,29 +79,29 @@ void loop() {
   if (connected) {
     // ウィンカーレバー
     if (digitalRead(GPIO_WINKER_LEFT) && winker_last != 1) {
-      bleGamepad.press(GPIO_WINKER_LEFT);
-      bleGamepad.release(GPIO_WINKER_RIGHT);
+      bleGamepad.press(BTN_WINKER_LEFT);
+      bleGamepad.release(BTN_WINKER_RIGHT);
       sp("Winker: LEFT");
       winker_last = 1;
       autowinkeroff = millis() + 250;
       update = true;
     } else if (digitalRead(GPIO_WINKER_RIGHT) && winker_last != 2) {
-      bleGamepad.release(GPIO_WINKER_LEFT);
-      bleGamepad.press(GPIO_WINKER_RIGHT);
+      bleGamepad.release(BTN_WINKER_LEFT);
+      bleGamepad.press(BTN_WINKER_RIGHT);
       sp("Winker: RIGHT");
       winker_last = 2;
       autowinkeroff = millis() + 250;
       update = true;
     } else if (!digitalRead(GPIO_WINKER_LEFT) && !digitalRead(GPIO_WINKER_RIGHT) && winker_last != 0) {
-      if (winker_last == 1) bleGamepad.press(GPIO_WINKER_LEFT);
-      else bleGamepad.press(GPIO_WINKER_RIGHT);
+      if (winker_last == 1) bleGamepad.press(BTN_WINKER_LEFT);
+      else bleGamepad.press(BTN_WINKER_RIGHT);
       sp("Winker: OFF");
       winker_last = 0;
       autowinkeroff = millis() + 250;
       update = true;
     } else if (autowinkeroff > 0 && autowinkeroff < millis()) {
-      bleGamepad.release(GPIO_WINKER_LEFT);
-      bleGamepad.release(GPIO_WINKER_RIGHT);
+      bleGamepad.release(BTN_WINKER_LEFT);
+      bleGamepad.release(BTN_WINKER_RIGHT);
     }
 
     // シフトレバー
