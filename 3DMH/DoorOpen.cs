@@ -16,15 +16,17 @@ public class DoorOpen : UdonSharpBehaviour {
     public bool isSlider = false;       // 引き戸の場合はtrue、開き戸の場合はfalse
     public bool invert = false;         // 逆方向に開く場合はtrue（falseにして正の値を与えてもよい）
     public float speed = 1.0f;          // 開閉速度(s)
+    [Header("対象オブジェクト（オプション）未指定時は親")]
+    public bool parentX2 = false;       // ドアのオブジェクトは親の親
+    public bool parentX3 = false;       // ドアのオブジェクトは親の親の親
+    public Transform doorObject;        // ドアのオブジェクト 優先順位1（省略可）
+    public string doorObjectName = "";  // ドアのオブジェクトの名前 優先順位2（省略可）
     [Header("開き戸の場合")]
     public int closeAngle = 0;          // 開き戸: 閉じたときの角度
     public int openAngle = -88;         // 開き戸: 開いた時の角度
     [Header("引き戸の場合")]
     public float closePosition = 0f;    // 引き戸: 閉じたときの位置(m)
     public float openPosition = -0.74f; // 引き戸: 開いた時の位置(m)
-    [Header("対象オブジェクト（オプション）未指定時は親")]
-    public Transform doorObject;        // ドアのオブジェクト 優先順位1（省略可）
-    public string doorObjectName = "";  // ドアのオブジェクトの名前 優先順位2（省略可）
 
     private bool isOpening = false;
     private bool isClosing = false;
@@ -40,7 +42,13 @@ public class DoorOpen : UdonSharpBehaviour {
             }
         }
         if (doorObject == null) {
-            doorObject = transform.parent.gameObject.transform;
+            if (parentX3) {
+                doorObject = transform.parent.parent.parent.gameObject.transform;
+            } else if (parentX2) {
+                doorObject = transform.parent.parent.gameObject.transform;
+            } else {
+                doorObject = transform.parent.gameObject.transform;
+            }
         }
     }
 
