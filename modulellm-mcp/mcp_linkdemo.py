@@ -1,0 +1,427 @@
+#!/usr/bin/env python3
+# Module-LLM LLM/TTSのMCPサーバー gradio版
+#   LLMの出力をTTSにリンクするデモ
+# Copyright (c) 2025 Kaz  (https://akibabara.com/blog/)
+# Released under the MIT license.
+
+# オリジナル https://github.com/anoken/modulellm_maniax
+# Copyright (c) 2025 aNoken
+
+import socket
+import json
+import time
+import argparse
+import gradio as gr
+
+# グローバル変数
+sf_sock = None
+llm_work_id = None
+tts_work_id = None
+buffer_data = ""
+quiet = False
+
+def set_led_brightness(color: str, value: int) -> None:
+    """LEDの明るさを設定する"""
+    with open(f"/sys/class/leds/{color}/brightness", "w") as f:
+        f.write(str(value))
+
+def set_led_color(red: int, green: int, blue: int) -> None:
+    """LEDの色を設定する"""
+    set_led_brightness("R", red)
+    set_led_brightness("G", green)
+    set_led_brightness("B", blue)
+
+def connect_server(host, port) -> bool:
+    """StackFlowサーバーに接続する"""
+    global sf_sock
+
+    try:
+        sf_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sf_sock.connect((host, port))
+        print(f'サーバー {host}:{port} に接続しました')
+    except Exception as e:
+        print(f'エラー: {e}')
+        return False
+
+    return True
+
+def disconnect_server():
+    """StackFlowサーバーを切断する"""
+    global sf_sock
+
+    if sf_sock:
+        sf_sock.close()
+        sf_sock = None
+
+def send_json_request(sock, request_data):
+    """StackFlowサーバーにJSONリクエストを送信"""
+    json_string = json.dumps(request_data)
+    if not quiet:
+        print(f'送信したリクエスト: {json_string}')
+    try:
+        sock.sendall(json_string.encode('utf-8'))
+        time.sleep(1)
+    except Exception as e:
+        print(f'リクエスト送信エラー: {e}')
+
+def receive_response(sock, timeout=20):
+    """StackFlowサーバーからのレスポンスを受信して処理"""
+    global buffer_data
+    
+    try:
+        # バッファにデータがある場合はそれを使用
+        if not buffer_data:
+            sock.settimeout(None if timeout == 0 else timeout)
+            data = sock.recv(4096)
+            if not data:
+                return None
+            buffer_data = data.decode('utf-8')
+        
+        # 改行を含むか確認
+        if '\n' in buffer_data:
+            line, buffer_data = buffer_data.split('\n', 1)
+            if not quiet:
+                print(f'受信したレスポンス: {line}')
+            return json.loads(line)
+        else:
+            response = buffer_data
+            buffer_data = ""
+            if not quiet:
+                print(f'受信したレスポンス: {response}')
+            return json.loads(response)
+            
+    except socket.timeout:
+        print('レスポンス受信タイムアウト')
+        return None
+    except Exception as e:
+        print(f'レスポンス受信エラー: {e}')
+        buffer_data = ""
+    return None
+
+def setup_llm(model) -> bool:
+    """LLMのセットアップを実行する"""
+    global llm_work_id
+
+    try:
+        # LLMセットアップ
+        llm_setup = {
+            "request_id": "llm_001",
+            "work_id": "llm",
+            "action": "setup",
+            "object": "llm.setup",
+            "data": {
+                "model": model,
+                "response_format": "llm.utf-8.stream",
+                "input": "llm.utf-8.stream",
+                "enoutput": True,
+                "max_token_len": 1023,
+                #"prompt": "あなたは、スタックチャン という名前の、親切で礼儀正しく正直なAI アシスタントです。。"
+                "prompt": "You are a kind, polite and honest AI assistant named Stack-Chan."
+            }
+        }
+        send_json_request(sf_sock, llm_setup)
+        res = receive_response(sf_sock)
+        if res and res.get('error', {}).get('code', -999) != 0:
+            raise Exception(f'LLMセットアップ エラー: {res["error"]["message"]}')
+        llm_work_id = res['work_id']
+
+    except Exception as e:
+        print(f'エラー: {e}')
+        return False
+
+    return True
+
+def setup_tts(model) -> bool:
+    """TTSとオーディオのセットアップを実行する"""
+    global tts_work_id
+
+    try:
+        # オーディオセットアップ
+        audio_setup = {
+            "request_id": "audio_setup",
+            "work_id": "audio",
+            "action": "setup",
+            "object": "audio.setup",
+            "data": {
+                "capcard": 0,
+                "capdevice": 0,
+                "capVolume": 0.5,
+                "playcard": 0,
+                "playdevice": 1,
+                "playVolume": 0.15
+            }
+        }
+        send_json_request(sf_sock, audio_setup)
+        res = receive_response(sf_sock)
+        if res and res.get('error', {}).get('code', -999) != 0:
+            raise Exception(f'オーディオセットアップ エラー: {res["error"]["message"]}')
+
+        # TTSセットアップ
+        tts_setup = {
+            "request_id": "melotts_setup",
+            "work_id": "melotts",
+            "action": "setup",
+            "object": "melotts.setup",
+            "data": {
+                "model": model,
+                "response_format": "sys.pcm",
+                "input": ["tts.utf-8.stream"],
+                "enoutput": False,
+                "enaudio": True
+            }
+        }
+        send_json_request(sf_sock, tts_setup)
+        res = receive_response(sf_sock)
+        if res and res.get('error', {}).get('code', -999) != 0:
+            raise Exception(f'TTSセットアップ エラー: {res["error"]["message"]}')
+        tts_work_id = res['work_id']
+
+    except Exception as e:
+        print(f'エラー: {e}')
+        return False
+
+    return True
+
+def setup_link_llmtts():
+    """LLMの出力をTTSの入力にリンクする"""
+    global llm_work_id, tts_work_id
+
+    try:
+        link_setup = {
+            "request_id": "3",
+            "work_id": tts_work_id,
+            "action": "link",
+            "object": "work_id",
+            "data": llm_work_id
+        }
+        send_json_request(sf_sock, link_setup)
+        res = receive_response(sf_sock)
+        if res and res.get('error', {}).get('code', -999) != 0:
+            raise Exception(f'LLM/TTSリンク エラー: {res["error"]["message"]}')
+        
+    except Exception as e:
+        print(f'エラー: {e}')
+        return False
+
+    return True
+
+def exit_session():
+    """StackFlowサーバーとのセッションを終了する"""
+    global sf_sock, buffer_data
+    
+    buffer_data = ""
+    if sf_sock:
+        try:
+            # リセット
+            reset_request = {
+                "request_id": "4",
+                "work_id": "sys",
+                "action": "reset"
+            }
+            send_json_request(sf_sock, reset_request)
+            res = receive_response(sf_sock)
+            if res and res.get('error', {}).get('code', -999) != 0:
+                raise Exception(f'リセット エラー: {res["error"]["message"]}')
+        except Exception as e:
+            print(f'エラー: {e}')
+        finally:
+            disconnect_server()     # サーバーを切断
+
+# MCP Tool: LLMにメッセージを送信する
+def send_message(message: str) -> str:
+    """LLMにメッセージを送信する
+    Args:
+        message (str): 送信するメッセージ
+    Returns:
+        str: 応答テキスト
+    """
+    global sf_sock
+    restext = ""
+    timeout = 60
+
+    if not sf_sock:
+        return "Error: LLM is not initialized"
+
+    try:
+        # 推論リクエストの送信
+        print("Message:",message)
+        llm_request = {
+            "request_id": "llm_001",
+            "work_id": llm_work_id,
+            "action": "inference",
+            "object": "llm.utf-8.stream",
+            "data": {
+                "delta": message,
+                "index": 0,
+                "finish": True
+            }
+        }
+        send_json_request(sf_sock, llm_request)
+            
+        # ストリーミングレスポンスの受信と表示
+        start_time = time.time()
+        while True:
+            if time.time() - start_time > timeout:
+                print(f"\nタイムアウト: 応答が{timeout}秒を超えました")
+                break                
+            res = receive_response(sf_sock, 1)
+            if res and res.get('error', {}).get('code', 0) != 0:
+                print(f'エラー: {res["error"]["message"]}')
+                break
+            if res and res.get('data', {}).get('delta'):
+                print(res['data']['delta'], end='', flush=True)
+                restext += res['data']['delta']
+            if res and res.get('data', {}).get('finish'):
+                print()
+                restext += "\n"
+                break
+
+    except Exception as e:
+        print(f'エラー: {e}')
+        return f"error: {str(e)}"
+
+    return restext
+
+# MCP Tool: TTSでテキストを再生する
+def speak_text(message: str) -> str:
+    """TTSでテキストを再生する (English only)
+    Args:
+        message (str): 再生するテキスト
+    Returns:
+        str: 結果
+    """
+    global sf_sock
+    
+    if not sf_sock:
+        return "Error: TTS is not initialized"
+
+    try:
+        # TTS推論
+        inference_request = {
+            "request_id": "tts_inference",
+            "work_id": tts_work_id,
+            "action": "inference",
+            "object": "tts.utf-8.stream",
+            "data": {
+                "delta": message,
+                "index": 0,
+                "finish": True
+            }
+        }
+        send_json_request(sf_sock, inference_request)
+        res = receive_response(sf_sock, 3)     # なぜか応答が来ないので3秒でタイムアウトさせる
+        if res is None:
+            print("レスポンスがタイムアウトしましたが、処理を続行します")
+            
+    except Exception as e:
+        print(f'エラー: {e}')
+        return f"error: {str(e)}"
+
+    return "success"
+
+# MCP Tool: 点灯するLEDの色を設定する
+def set_led_colors(red: int, green: int, blue: int) -> str:
+    """点灯するLEDの色を設定する
+    Args:
+        red (int): 赤色の明るさ (0-255)
+        green (int): 緑色の明るさ (0-255)
+        blue (int): 青色の明るさ (0-255)
+    Returns:
+        str: 結果
+    """
+    if (red < 0 or red > 255 or green < 0 or green > 255 or blue < 0 or blue > 255):
+        return "Invalid color values. Please provide values between 0 and 255."
+    set_led_color(red, green, blue)
+    return "success"
+
+def create_gradio_interface():
+    with gr.Blocks(title="Module-LLM MCP Server") as demo:
+        gr.Markdown("# Module-LLM MCP Server")
+        
+        # LLMにメッセージ送信
+        gr.Markdown("## LLMにメッセージ送信")
+        msg_input = gr.Textbox(label="メッセージ")
+        msg_output = gr.Textbox(label="応答")
+        msg_button = gr.Button("送信")
+        msg_button.click(fn=send_message, inputs=msg_input, outputs=msg_output)
+        gr.Markdown("---")
+        
+        # TTSでテキスト読み上げ
+        gr.Markdown("## TTSでテキスト読み上げ")
+        speak_input = gr.Textbox(label="読み上げるテキスト")
+        speak_output = gr.Textbox(label="結果")
+        speak_button = gr.Button("読み上げる")
+        speak_button.click(fn=speak_text, inputs=speak_input, outputs=speak_output)
+        gr.Markdown("---")
+        
+        # LED制御
+        gr.Markdown("## LED制御")
+        with gr.Row():
+            red = gr.Slider(0, 255, 0, label="赤", step=1)
+            green = gr.Slider(0, 255, 0, label="緑", step=1)
+            blue = gr.Slider(0, 255, 0, label="青", step=1)
+        led_output = gr.Textbox(label="結果")
+        led_button = gr.Button("LEDを設定")
+        led_button.click(fn=set_led_colors, inputs=[red, green, blue], outputs=led_output)
+
+    return demo
+
+def main():
+    global quiet
+    parser = argparse.ArgumentParser(description='LLM MCP Server')
+    parser.add_argument('--host', type=str, default='localhost', help='LLM server hostname')
+    parser.add_argument('--port', type=int, default=10001, help='LLM server port')
+    parser.add_argument('--ttsmodel', type=str, default='melotts_zh-cn', help='TTS Model')
+    parser.add_argument('--llmmodel', type=str, default='qwen2.5-0.5B-prefill-20e', help='LLM Model')
+    parser.add_argument('--ttslink', type=bool, default=True, help='LLM output to TTS')
+    parser.add_argument('--quiet', action='store_true', help='no output JSON log')
+    args = parser.parse_args()
+    quiet = args.quiet
+
+    try:
+        # StackFlowサーバーに接続
+        print(f"Connecting to StackFlow server: {args.host}:{args.port}")
+        if connect_server(args.host, args.port):
+            print("Connected to StackFlow server")
+        else:
+            raise Exception("Cannot connect to StackFlow server")
+
+        # LLMの初期化
+        print(f"Initializing LLM with model: {args.llmmodel}")
+        if setup_llm(args.llmmodel):    # LLMのセットアップ
+            print("LLM initialization completed")
+        else:
+            raise Exception("LLM initialization failed")
+
+        # TTSの初期化
+        print(f"Initializing TTS with model: {args.ttsmodel}")
+        if setup_tts(args.ttsmodel):    # TTSのセットアップ
+            print("TTS initialization completed")
+        else:
+            raise Exception("TTS initialization failed")
+
+        # LLMの出力をTTSの入力にリンクする
+        if args.ttslink:
+            print(f"Setting LLM to TTS link")
+            if setup_link_llmtts():
+                print("LLM to TTS link completed")
+            else:
+                raise Exception("LLM to TTS link failed")
+
+        # MCPサーバーの起動
+        print("Starting gradio MCP server...")
+        mcpgr = create_gradio_interface()
+        mcpgr.launch(
+            mcp_server=True, 
+            server_name="0.0.0.0", 
+            server_port=7860
+        )
+                    
+    except KeyboardInterrupt:
+        print("\nShutting down...")
+    finally:
+        print("Cleaning up...")
+        exit_session()  # StackFlowサーバーとのセッションを終了
+
+if __name__ == "__main__":
+    main()
