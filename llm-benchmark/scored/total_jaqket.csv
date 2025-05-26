@@ -1,0 +1,12 @@
+﻿テスト名,サーバー,パラメーター数,モデル,正解率,正解数,有効解答数,異常回答数,合計問題数,平均応答時間
+jaqket,chatgpt,,gpt-4o-mini,86.00%,86,100,0,100,734
+jaqket,lmstudio,14B,cyberagent-deepseek-r1-distill-qwen-14b-japanese,67.01%,65,97,3,100,22450
+jaqket,lmstudio,32B,cyberagent-deepseek-r1-distill-qwen-32b-japanese,80.61%,79,98,2,100,25064
+jaqket,lmstudio,7B,elyza-japanese-llama-2-7b-instruct,15.00%,15,100,0,100,694
+jaqket,lmstudio,1B,llama-3.2-1b-instruct,7.00%,7,100,0,100,45
+jaqket,lmstudio,1B,openbuddy-llama3.2-1b-v23.1-131k-i1,3.00%,3,100,0,100,553
+jaqket,lmstudio,3B,openbuddy-llama3.2-3b-v23.2-131k-i1,12.00%,12,100,0,100,76
+jaqket,lmstudio,30B-A3B,qwen3-30b-a3b,80.00%,80,100,0,100,4453
+jaqket,lmstudio,7B,sakanaai.evollm-jp-v1-7b,45.00%,45,100,0,100,360
+jaqket,lmstudio,1.5B,sakanaai.tinyswallow-1.5b,4.00%,4,100,0,100,554
+jaqket,modulellm,1B,llama3.2-1B-p256-ax630c,0.00%,0,16,84,100,4522
